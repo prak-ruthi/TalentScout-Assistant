@@ -1,19 +1,35 @@
 # TalentScout App
 import streamlit as st
 import google.generativeai as genai
-import re
 
-# --- CONFIGURATION ---
-# Replace with your actual Gemini API Key
-API_KEY = "YOUR_GEMINI_API_KEY"
-genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel('gemini-pro')
+# --- UI SETUP ---
+st.set_page_config(page_title="TalentScout Hiring Assistant", page_icon="🤖")
+
+# --- SIDEBAR: API KEY MANAGEMENT ---
+with st.sidebar:
+    st.title("🔑 Configuration")
+    user_api_key = st.text_input(
+        "Enter Gemini API Key", 
+        type="password", 
+        help="Get your key from https://aistudio.google.com/"
+    )
+    st.info("Your key is used only for this session and is not stored.")
+
+# --- INITIALIZATION ---
+if user_api_key:
+    try:
+        genai.configure(api_key=user_api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash') # Using the faster 1.5-flash model
+    except Exception as e:
+        st.error(f"Configuration Error: {e}")
+else:
+    st.warning("Please enter your API Key in the sidebar to start.")
+    st.stop() # Stops the app execution until a key is provided
 
 # --- SESSION STATE INITIALIZATION ---
 if "step" not in st.session_state:
     st.session_state.step = "greeting"
     st.session_state.candidate_data = {}
-    st.session_state.chat_history = []
 
 def get_llm_response(prompt):
     try:
@@ -22,8 +38,6 @@ def get_llm_response(prompt):
     except Exception as e:
         return f"Error: {str(e)}"
 
-# --- UI SETUP ---
-st.set_page_config(page_title="TalentScout Hiring Assistant", page_icon="🤖")
 st.title("🤖 TalentScout Hiring Assistant")
 
 # --- CHATBOT LOGIC ---
@@ -39,11 +53,8 @@ elif st.session_state.step == "info_gathering":
         st.write("### Candidate Information")
         name = st.text_input("Full Name")
         email = st.text_input("Email Address")
-        phone = st.text_input("Phone Number")
-        exp = st.number_input("Years of Experience", min_value=0, max_value=50)
-        pos = st.text_input("Desired Position(s)")
-        loc = st.text_input("Current Location")
         tech = st.text_area("Tech Stack (e.g., Python, Django, AWS)")
+        exp = st.number_input("Years of Experience", min_value=0, max_value=50)
         
         submitted = st.form_submit_button("Submit & Generate Questions")
         
@@ -60,13 +71,11 @@ elif st.session_state.step == "info_gathering":
 elif st.session_state.step == "tech_questions":
     st.write(f"### Technical Screening for {st.session_state.candidate_data['name']}")
     
-    # Prompt Engineering for Question Generation
     tech_stack = st.session_state.candidate_data['tech']
     prompt = f"""
     You are a technical recruiter. Generate 3 to 5 challenging technical interview questions 
     for a candidate with {st.session_state.candidate_data['exp']} years of experience 
-    proficient in the following tech stack: {tech_stack}. 
-    Ensure the questions assess deep proficiency. Format as a numbered list.
+    proficient in: {tech_stack}. Format as a numbered list.
     """
     
     if "questions" not in st.session_state:
@@ -80,8 +89,10 @@ elif st.session_state.step == "tech_questions":
         st.rerun()
 
 elif st.session_state.step == "end":
-    st.success("Thank you for completing the initial screening!")
-    st.write("Our recruitment team will review your profile and the generated technical assessment. We will contact you at your provided email shortly.")
+    st.success("Screening complete!")
     if st.button("Restart"):
-        st.session_state.clear()
+        # Clear specific keys but keep the API Key in the sidebar
+        for key in ["step", "candidate_data", "questions"]:
+            if key in st.session_state:
+                del st.session_state[key]
         st.rerun()
