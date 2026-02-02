@@ -10,7 +10,7 @@ genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('gemini-pro')
 
 # --- SESSION STATE INITIALIZATION ---
-if "step" not in st.st_session_state:
+if "step" not in st.session_state:
     st.session_state.step = "greeting"
     st.session_state.candidate_data = {}
     st.session_state.chat_history = []
