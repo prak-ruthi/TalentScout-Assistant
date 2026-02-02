@@ -1,74 +1,100 @@
 import streamlit as st
 import google.generativeai as genai
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="TalentScout Hiring Assistant", page_icon="🤖")
+# --- 1. PAGE CONFIGURATION ---
+st.set_page_config(page_title="TalentScout Assistant", page_icon="🤖", layout="centered")
 
-# --- SIDEBAR: SECURE KEY INPUT ---
+# --- 2. SIDEBAR FOR SECURE API KEY INPUT ---
 with st.sidebar:
-    st.title("🔑 API Settings")
-    # Using type="password" hides the key from shoulder-surfers
-    user_api_key = st.text_input("Enter your Gemini API Key", type="password")
-    st.info("Your key is stored in your current browser session only.")
-    
-    if st.button("Clear Session"):
-        st.session_state.clear()
-        st.rerun()
+    st.title("🔐 Security Settings")
+    st.markdown("---")
+    # type="password" ensures the key is hidden while typing
+    user_api_key = st.text_input("Enter Google Gemini API Key", type="password")
+    st.info("Your key is only used for this session and is not stored.")
+    st.markdown("[Get a Free API Key here](https://aistudio.google.com/)")
 
-# --- SECURITY GATE ---
-# If no key is provided, show a welcome screen and STOP the script.
+# --- 3. SMART MODEL HANDLER ---
+# Pauses execution until a key is provided
 if not user_api_key:
-    st.title("🤖 Welcome to TalentScout")
-    st.warning("To begin, please enter your Gemini API Key in the sidebar.")
-    st.markdown("""
-    1. Go to [Google AI Studio](https://aistudio.google.com/)
-    2. Click **'Get API Key'**
-    3. Paste it in the box on the left 👈
-    """)
+    st.title("🤖 TalentScout Hiring Assistant")
+    st.info("### Welcome! \nPlease **enter your Gemini API Key in the sidebar** to start the screening.")
     st.stop()
 
-# --- INITIALIZATION (Only runs if key exists) ---
+def get_llm_response(prompt):
+    """Tries multiple model versions to avoid 404/Not Found errors."""
+    genai.configure(api_key=user_api_key)
+    # List of models to try in order of availability
+    model_versions = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
+    
+    last_error = ""
+    for version in model_versions:
+        try:
+            model = genai.GenerativeModel(version)
+            response = model.generate_content(prompt)
+            if response and response.text:
+                return response.text
+        except Exception as e:
+            last_error = str(e)
+            continue # Try the next version if the current one fails
+            
+    return f"❌ All models failed. Technical Error: {last_error}"
+
+# --- 4. SESSION STATE MANAGEMENT ---
 if "step" not in st.session_state:
-    st.session_state.step = "info_gathering"
+    st.session_state.step = "greeting"
+if "candidate_data" not in st.session_state:
     st.session_state.candidate_data = {}
+if "questions" not in st.session_state:
+    st.session_state.questions = ""
 
-# --- HELPER FUNCTION ---
-def get_ai_response(prompt):
-    try:
-        genai.configure(api_key=user_api_key)
-        # Gemini 3 Flash is faster and less likely to "hang"
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"Error: {str(e)}"
+# --- 5. APPLICATION FLOW ---
+st.title("🤖 TalentScout Hiring Assistant")
 
-# --- MAIN APP LOGIC ---
-st.title("🚀 TalentScout Screening")
+# STEP 1: WELCOME SCREEN
+if st.session_state.step == "greeting":
+    st.subheader("Automated Technical Screening")
+    st.write("Welcome! This AI-powered tool generates custom technical assessments based on your expertise.")
+    if st.button("Start Screening"):
+        st.session_state.step = "info_gathering"
+        st.rerun()
 
-if st.session_state.step == "info_gathering":
+# STEP 2: INFORMATION COLLECTION
+elif st.session_state.step == "info_gathering":
+    st.subheader("Candidate Information")
     with st.form("info_form"):
-        name = st.text_input("Candidate Name")
-        tech = st.text_area("Tech Stack")
-        submitted = st.form_submit_button("Generate Interview Questions")
+        name = st.text_input("Full Name (e.g., Prakruthi B)")
+        exp = st.number_input("Years of Experience", min_value=0, max_value=40, step=1)
+        tech = st.text_area("Tech Stack (e.g., Python, SQL, Machine Learning)")
         
-        if submitted:
+        if st.form_submit_button("Generate Assessment"):
             if name and tech:
-                st.session_state.candidate_data = {"name": name, "tech": tech}
+                st.session_state.candidate_data = {"name": name, "tech": tech, "exp": exp}
                 st.session_state.step = "tech_questions"
                 st.rerun()
+            else:
+                st.warning("Please provide your Name and Tech Stack to proceed.")
 
+# STEP 3: TECHNICAL ASSESSMENT
 elif st.session_state.step == "tech_questions":
-    st.write(f"### Questions for {st.session_state.candidate_data['name']}")
+    data = st.session_state.candidate_data
+    st.subheader(f"Technical Assessment for {data['name']}")
+    st.info(f"Targeting: {data['tech']} ({data['exp']} years experience)")
+
+    if not st.session_state.questions:
+        with st.spinner("🤖 AI is selecting a compatible model and generating questions..."):
+            prompt = f"Generate 4 challenging interview questions for a candidate with {data['exp']} years exp in {data['tech']}."
+            st.session_state.questions = get_llm_response(prompt)
     
-    # Check if questions already exist to avoid re-generating on every click
-    if "questions" not in st.session_state:
-        with st.spinner("AI is crafting questions..."):
-            prompt = f"Generate 3 technical questions for {st.session_state.candidate_data['tech']}."
-            st.session_state.questions = get_ai_response(prompt)
-    
-    st.write(st.session_state.questions)
-    
-    if st.button("Start Over"):
-        st.session_state.clear()
+    st.markdown(st.session_state.questions)
+    if st.button("Complete Assessment"):
+        st.session_state.step = "end"
+        st.rerun()
+
+# STEP 4: CONCLUSION
+elif st.session_state.step == "end":
+    st.success("✅ Application successfully recorded. Thank you!")
+    if st.button("Restart New Session"):
+        # Clears all cached data to allow a fresh start
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
         st.rerun()
