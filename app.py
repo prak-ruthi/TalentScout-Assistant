@@ -1,102 +1,127 @@
 import streamlit as st
 import google.generativeai as genai
 
-# --- 1. PAGE SETUP ---
-st.set_page_config(page_title="TalentScout Assistant", page_icon="🤖", layout="centered")
+# --- 1. PAGE CONFIG ---
+st.set_page_config(page_title="TalentScout Hiring Assistant", page_icon="🤖", layout="centered")
 
-# --- 2. SECURE SIDEBAR ---
+# --- 2. SIDEBAR: SECURE KEY INPUT ---
 with st.sidebar:
-    st.title("🔐 Security Settings")
-    user_api_key = st.text_input("Enter Gemini API Key", type="password")
+    st.title("🔑 API Settings")
+    user_api_key = st.text_input("Enter Gemini API Key", type="password", help="Paste your Gemini 1.5 Flash Key")
+    
     if st.button("Reset Session"):
         st.session_state.clear()
         st.rerun()
-    st.info("Your key is used only for this session and is not stored.")
+    
+    st.markdown("---")
+    st.info("Status: **Gemini 1.5 Flash Active**")
 
-# --- 3. SESSION STATE (PREVENTS KEYERRORS) ---
-# We initialize all required keys to prevent the error seen in your screenshot
+# --- 3. SESSION STATE INITIALIZATION ---
+# This block prevents the 'KeyError' by ensuring all keys exist from the start
 if "step" not in st.session_state:
     st.session_state.step = "greeting"
 if "candidate_data" not in st.session_state:
-    st.session_state.candidate_data = {"name": "", "tech": "", "exp": 0, "pos": "", "phone": "", "loc": ""}
+    st.session_state.candidate_data = {
+        "name": "", "email": "", "phone": "", 
+        "pos": "", "loc": "", "exp": 0, "tech": ""
+    }
 if "questions" not in st.session_state:
     st.session_state.questions = None
 
-# --- 4. SMART MODEL ROUTER ---
+# --- 4. LLM FUNCTION ---
 def generate_questions(tech, exp, pos, api_key):
-    genai.configure(api_key=api_key)
-    # Automatically tries the newest model, then falls back to the most stable one
-    # This solves the 404 error from your screenshot
-    for model_name in ['gemini-1.5-flash', 'gemini-pro']:
-        try:
-            model = genai.GenerativeModel(model_name)
-            prompt = f"Act as a senior technical recruiter. Generate 3 challenging interview questions for a {pos} with {exp} years exp in {tech}."
-            response = model.generate_content(prompt)
-            return response.text
-        except Exception:
-            continue
-    return "❌ Error: Could not connect to any available Gemini models. Please check your API key."
+    try:
+        genai.configure(api_key=api_key)
+        # Specifically calling 1.5-flash as requested
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        prompt = f"""
+        Act as a senior technical recruiter for TalentScout. 
+        The candidate is applying for '{pos}' with {exp} years of experience.
+        Tech stack: {tech}.
+        Generate 3-5 challenging technical interview questions that test deep knowledge 
+        of architecture and problem-solving.
+        """
+        
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"⚠️ Connection Error: {str(e)}"
 
-# --- 5. APP FLOW ---
+# --- 5. MAIN UI LOGIC ---
 st.title("🤖 TalentScout Hiring Assistant")
 
 if not user_api_key:
-    st.warning("Please enter your API Key in the sidebar to begin.")
+    st.warning("Please enter your Gemini 1.5 Flash API Key in the sidebar to begin.")
     st.stop()
 
-# STEP 1: GREETING (Requirement 1)
+# STEP 1: GREETING & PURPOSE (Mandatory Requirement)
 if st.session_state.step == "greeting":
-    st.subheader("Welcome to TalentScout")
-    st.write("I am your AI Recruitment Assistant. I help collect candidate profiles and generate custom technical assessments.")
-    if st.button("Start Application"):
+    st.subheader("Welcome to the TalentScout Technical Screening")
+    st.write("""
+    I am an agentic AI designed to streamline the recruitment process. 
+    I will gather your professional profile and generate a customized technical 
+    assessment based on your specific expertise.
+    """)
+    if st.button("Start Screening"):
         st.session_state.step = "info_gathering"
         st.rerun()
 
-# STEP 2: INFO GATHERING (Mandatory Fields)
+# STEP 2: INFO GATHERING (Mandatory Fields Added)
 elif st.session_state.step == "info_gathering":
     with st.form("info_form"):
-        st.subheader("Candidate Information")
+        st.subheader("Candidate Profile")
         col1, col2 = st.columns(2)
         with col1:
             name = st.text_input("Full Name")
+            email = st.text_input("Email Address")
             phone = st.text_input("Phone Number")
-            loc = st.text_input("Location")
         with col2:
             pos = st.text_input("Desired Position")
-            exp = st.number_input("Experience (Years)", min_value=0, step=1)
-            tech = st.text_area("Tech Stack")
+            loc = st.text_input("Current Location")
+            exp = st.number_input("Years of Experience", min_value=0, step=1)
         
-        if st.form_submit_button("Generate Assessment"):
-            if all([name, pos, tech]):
-                st.session_state.candidate_data = {"name": name, "tech": tech, "exp": exp, "pos": pos, "phone": phone, "loc": loc}
+        tech = st.text_area("Tech Stack (e.g. Python, Django, PostgreSQL, Docker)")
+        
+        submitted = st.form_submit_button("Generate Assessment")
+        if submitted:
+            if all([name, email, phone, pos, loc, tech]):
+                st.session_state.candidate_data = {
+                    "name": name, "email": email, "phone": phone,
+                    "pos": pos, "loc": loc, "exp": exp, "tech": tech
+                }
                 st.session_state.step = "view_questions"
                 st.rerun()
             else:
-                st.error("Please fill in Name, Position, and Tech Stack.")
+                st.error("Please fill in all mandatory fields to continue.")
 
 # STEP 3: TECHNICAL QUESTIONS
 elif st.session_state.step == "view_questions":
     data = st.session_state.candidate_data
-    st.subheader(f"Technical Screening for {data['name']}")
-    
-    # Safe display logic to prevent KeyError crashes
-    st.info(f"Targeting: {data.get('pos', 'Not Specified')} | Experience: {data.get('exp', 0)} years")
+    st.subheader(f"Technical Assessment: {data['name']}")
+    st.info(f"Targeting: {data['pos']} | {data['exp']} Years Experience")
 
     if st.session_state.questions is None:
-        with st.spinner("Analyzing profile and generating questions..."):
+        with st.spinner("Gemini 1.5 Flash is generating your specialized questions..."):
             st.session_state.questions = generate_questions(data['tech'], data['exp'], data['pos'], user_api_key)
             st.rerun()
 
+    st.markdown("---")
     st.markdown(st.session_state.questions)
+    st.markdown("---")
+    
     if st.button("Finish & Exit"):
         st.session_state.step = "exit"
         st.rerun()
 
-# STEP 4: EXIT
+# STEP 4: EXIT (Mandatory Requirement)
 elif st.session_state.step == "exit":
-    st.success("✅ Application Submitted Successfully!")
+    st.success("✅ Application Successfully Processed!")
     st.balloons()
-    st.write(f"Thank you, {st.session_state.candidate_data['name']}. Our team will contact you soon.")
-    if st.button("Restart"):
+    st.write(f"Thank you, **{st.session_state.candidate_data['name']}**.")
+    st.write(f"Your profile for the **{st.session_state.candidate_data['pos']}** role has been recorded.")
+    st.info("Our recruitment team will reach out via the provided email or phone number.")
+    
+    if st.button("Start New Session"):
         st.session_state.clear()
         st.rerun()
